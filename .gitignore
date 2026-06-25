@@ -1,0 +1,12 @@
+.DS_Store
+build/
+build_sym/
+*.log
+*.txt
+test.swift
+test_fkeys.swift
+test_key.swift
+xcuserdata/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
