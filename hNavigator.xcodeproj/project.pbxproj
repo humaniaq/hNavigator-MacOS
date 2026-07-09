@@ -143,7 +143,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 8509200E2FDA9097006B10C4 /* Build configuration list for PBXProject "Apple Navigator" */;
+			buildConfigurationList = 8509200E2FDA9097006B10C4 /* Build configuration list for PBXProject "hNavigator" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -341,7 +341,6 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = hNavigator;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
@@ -375,7 +374,6 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = hNavigator;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
@@ -442,7 +440,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		8509200E2FDA9097006B10C4 /* Build configuration list for PBXProject "Apple Navigator" */ = {
+		8509200E2FDA9097006B10C4 /* Build configuration list for PBXProject "hNavigator" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8509201C2FDA9098006B10C4 /* Debug */,

@@ -25,19 +25,17 @@ public final class NetworkVFSProvider: VFSProvider, @unchecked Sendable {
         }
     }
 
-    private func executeCurl(arguments: [String], url: String? = nil, progress: ((Double) -> Void)? = nil) async throws -> Data {
+    private func executeCurl(arguments: [String], url: String, progress: ((Double, Int64) -> Void)? = nil) async throws -> Data {
         let task = Process()
         task.launchPath = "/usr/bin/curl"
         var args = arguments
         
         var tempConfigFile: URL? = nil
-        if let url = url {
-            if let configURL = createTempConfig(url: url) {
-                tempConfigFile = configURL
-                args.append(contentsOf: ["-K", configURL.path])
-            } else {
-                args.append(contentsOf: ["--", url])
-            }
+        if let configURL = createTempConfig(url: url) {
+            tempConfigFile = configURL
+            args.append(contentsOf: ["-K", configURL.path])
+        } else {
+            args.append(contentsOf: ["--", url])
         }
         
         defer {
@@ -73,7 +71,7 @@ public final class NetworkVFSProvider: VFSProvider, @unchecked Sendable {
                                 if let percentStr = line.components(separatedBy: CharacterSet.whitespaces).last(where: { $0.hasSuffix("%") }) {
                                     let clean = percentStr.replacingOccurrences(of: "%", with: "")
                                     if let val = Double(clean) {
-                                        progress(val / 100.0)
+                                        progress(val / 100.0, 0)
                                     }
                                 }
                             }
@@ -88,13 +86,20 @@ public final class NetworkVFSProvider: VFSProvider, @unchecked Sendable {
             }
         }
         
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        
-        if task.terminationStatus != 0 {
-            throw NSError(domain: "NetworkVFSProvider", code: Int(task.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Network error (curl code \(task.terminationStatus))"])
+        return try await withTaskCancellationHandler {
+            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            
+            if task.terminationStatus != 0 {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
+                throw NSError(domain: "NetworkVFSProvider", code: Int(task.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Network error (curl code \(task.terminationStatus))"])
+            }
+            return data
+        } onCancel: {
+            task.terminate()
         }
-        return data
     }
 
     public func listDirectory(at path: String) async throws -> [VFSNode] {
@@ -177,7 +182,7 @@ public final class NetworkVFSProvider: VFSProvider, @unchecked Sendable {
         return nodes
     }
     
-    public func copyItem(from src: String, to dst: String, progress: ((Double) -> Void)?) async throws {
+    public func copyItem(from src: String, to dst: String, progress: ((Double, Int64) -> Void)?) async throws {
         var finalDst = dst
         if dst.hasPrefix("/") {
             let srcName = src.components(separatedBy: "/").last ?? "downloaded_file"

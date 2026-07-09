@@ -105,7 +105,7 @@ public final class LocalVFSProvider: VFSProvider, @unchecked Sendable {
         }
     }
     
-    public func copyItem(from src: String, to dst: String, progress: ((Double) -> Void)?) async throws {
+    public func copyItem(from src: String, to dst: String, progress: ((Double, Int64) -> Void)?) async throws {
         let srcPath = cleanPath(src)
         var dstPath = cleanPath(dst)
         
@@ -125,6 +125,7 @@ public final class LocalVFSProvider: VFSProvider, @unchecked Sendable {
             try fileManager.createDirectory(atPath: dstPath, withIntermediateDirectories: true)
             let contents = try fileManager.contentsOfDirectory(atPath: srcPath)
             for item in contents {
+                try Task.checkCancellation()
                 let s = (srcPath as NSString).appendingPathComponent(item)
                 let d = (dstPath as NSString).appendingPathComponent(item)
                 try await copyItem(from: s, to: d, progress: progress)
@@ -132,7 +133,7 @@ public final class LocalVFSProvider: VFSProvider, @unchecked Sendable {
         } else {
             guard let attrs = try? fileManager.attributesOfItem(atPath: srcPath), let size = attrs[.size] as? UInt64, size > 0 else {
                 try fileManager.copyItem(atPath: srcPath, toPath: dstPath)
-                progress?(1.0)
+                progress?(1.0, 0) // zero delta for 0-byte file fallback
                 return
             }
             let inFile = try FileHandle(forReadingFrom: URL(fileURLWithPath: srcPath))
@@ -143,12 +144,16 @@ public final class LocalVFSProvider: VFSProvider, @unchecked Sendable {
                 try? outFile.close()
             }
             var copied: UInt64 = 0
+            var lastReportedCopied: UInt64 = 0
             let chunkSize = 1024 * 1024 // 1 MB chunks
             while true {
+                try Task.checkCancellation()
                 guard let data = try inFile.read(upToCount: chunkSize), !data.isEmpty else { break }
                 try outFile.write(contentsOf: data)
                 copied += UInt64(data.count)
-                progress?(Double(copied) / Double(size))
+                let delta = copied - lastReportedCopied
+                lastReportedCopied = copied
+                progress?(Double(copied) / Double(size), Int64(delta))
                 try await Task.sleep(nanoseconds: 10_000_000) // Yield to UI thread
             }
         }

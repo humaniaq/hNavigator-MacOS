@@ -88,7 +88,7 @@ public final class ArchiveVFSProvider: VFSProvider, @unchecked Sendable {
         return nodes
     }
     
-    public func copyItem(from src: String, to dst: String, progress: ((Double) -> Void)?) async throws {
+    public func copyItem(from src: String, to dst: String, progress: ((Double, Int64) -> Void)?) async throws {
         if dst.hasPrefix("/") {
             let components = src.replacingOccurrences(of: "archive://", with: "").components(separatedBy: "::/")
             guard components.count > 1 else { return }
@@ -99,6 +99,7 @@ public final class ArchiveVFSProvider: VFSProvider, @unchecked Sendable {
             
             let data = try await getFileContent(at: src)
             try data.write(to: URL(fileURLWithPath: finalDst), options: .atomic)
+            progress?(1.0, Int64(data.count))
         }
     }
     
@@ -139,6 +140,7 @@ public final class ArchiveVFSProvider: VFSProvider, @unchecked Sendable {
         
         do {
             _ = try archive.extract(entry, consumer: { chunk in
+                if Task.isCancelled { throw CancellationError() }
                 let chunkStart = bytesRead
                 let chunkEnd = bytesRead + UInt64(chunk.count)
                 
@@ -186,6 +188,7 @@ public final class ArchiveVFSProvider: VFSProvider, @unchecked Sendable {
         
         var data = Data()
         _ = try archive.extract(entry, consumer: { chunk in
+            if Task.isCancelled { throw CancellationError() }
             data.append(chunk)
         })
         

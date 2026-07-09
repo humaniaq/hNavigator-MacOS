@@ -66,18 +66,30 @@ public struct ContentView: View {
     @State private var currentProcessingNode: VFSNode? = nil
     
     // Copy Progress State
-    @State private var totalFilesToProcess: Int = 0
-    @State private var filesProcessedCount: Int = 0
+    @State private var totalBytesToProcess: Int64 = 0
+    @State private var totalBytesProcessed: Int64 = 0
+    @State private var operationStartTime: Date? = nil
+    @State private var timeRemainingString: String = ""
     @State private var currentCopyFileName: String = ""
     @State private var currentCopyFileProgress: Double = 0.0
     @State private var isOperationCancelled: Bool = false
+    @State private var currentOperationTask: Task<Void, Never>? = nil
+    
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useAll]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
 
     private func startCopyMoveQueue(nodes: [VFSNode], dest: String, isMove: Bool) {
         activeModal = .progress
         isOperationInProgress = true
         isOperationCancelled = false
-        totalFilesToProcess = nodes.count
-        filesProcessedCount = 0
+        totalBytesToProcess = 0
+        totalBytesProcessed = 0
+        operationStartTime = Date()
+        timeRemainingString = ""
         currentCopyFileProgress = 0.0
         
         self.filesToProcess = nodes
@@ -87,7 +99,38 @@ public struct ContentView: View {
         self.skipAll = false
         self.currentProcessingNode = nil
         
-        processNextFile()
+        operationMessage = "Calculating size..."
+        
+        Task {
+            var totalBytes: Int64 = 0
+            if let _ = activePanel.provider as? LocalVFSProvider {
+                let fm = FileManager.default
+                for node in nodes {
+                    if node.isDirectory {
+                        if let enumerator = fm.enumerator(atPath: node.path) {
+                            while let item = enumerator.nextObject() as? String {
+                                let path = (node.path as NSString).appendingPathComponent(item)
+                                if let attrs = try? fm.attributesOfItem(atPath: path), let s = attrs[.size] as? Int64 {
+                                    totalBytes += s
+                                }
+                            }
+                        }
+                    } else {
+                        totalBytes += node.size
+                    }
+                }
+            } else {
+                for node in nodes {
+                    totalBytes += node.size
+                }
+            }
+            
+            await MainActor.run {
+                self.totalBytesToProcess = totalBytes
+                self.operationMessage = ""
+                self.processNextFile()
+            }
+        }
     }
 
     private func appendPathComponent(_ path: String, _ component: String) -> String {
@@ -152,8 +195,29 @@ public struct ContentView: View {
         }
     }
 
+    private func updateTimeRemaining() {
+        guard let start = operationStartTime, totalBytesProcessed > 0, totalBytesToProcess > 0 else {
+            timeRemainingString = ""
+            return
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        guard elapsed > 1.0 else { return } // Wait a bit for stable speed
+        
+        let bytesPerSecond = Double(totalBytesProcessed) / elapsed
+        let remainingBytes = Double(totalBytesToProcess - totalBytesProcessed)
+        let remainingSeconds = remainingBytes / bytesPerSecond
+        
+        if remainingSeconds.isFinite && remainingSeconds >= 0 {
+            let mins = Int(remainingSeconds) / 60
+            let secs = Int(remainingSeconds) % 60
+            timeRemainingString = String(format: "%dm %02ds", mins, secs)
+        } else {
+            timeRemainingString = ""
+        }
+    }
+
     private func performCopyMoveAction(node: VFSNode, destPath: String, overwrite: Bool) {
-        Task {
+        currentOperationTask = Task {
             do {
                 if overwrite {
                     try? await inactivePanel.provider.deleteItem(at: destPath)
@@ -161,18 +225,32 @@ public struct ContentView: View {
                 
                 if conflictIsMove {
                     try await activePanel.provider.moveItem(from: node.path, to: destPath)
+                    await MainActor.run {
+                        self.totalBytesProcessed += node.size
+                    }
                 } else {
-                    try await activePanel.provider.copyItem(from: node.path, to: destPath) { progress in
+                    var fileBytesAdded: Int64 = 0
+                    try await activePanel.provider.copyItem(from: node.path, to: destPath) { progress, deltaBytes in
                         DispatchQueue.main.async {
                             self.currentCopyFileProgress = progress
+                            self.totalBytesProcessed += deltaBytes
+                            fileBytesAdded += deltaBytes
+                            self.updateTimeRemaining()
+                        }
+                    }
+                    await MainActor.run {
+                        if fileBytesAdded == 0 && node.size > 0 {
+                            self.totalBytesProcessed += node.size
                         }
                     }
                 }
                 
                 await MainActor.run {
-                    self.filesProcessedCount += 1
                     processNextFile()
                 }
+            } catch is CancellationError {
+                // Clean up partially copied file
+                try? await inactivePanel.provider.deleteItem(at: destPath)
             } catch {
                 await MainActor.run {
                     showError("Operation failed for \(node.name):\n\(error.localizedDescription)")
@@ -472,11 +550,11 @@ public struct ContentView: View {
             
             Spacer()
             
-            // About hManager Button
+            // About hNavigator Button
             Button(action: { activeModal = .about }) {
                 HStack(spacing: 4) {
                     Image(systemName: "info.circle.fill")
-                    Text("About hManager")
+                    Text("About hNavigator")
                 }
                 .font(theme.font(size: 12))
                 .foregroundColor(theme.topMenuBarTextColor)
@@ -1068,11 +1146,13 @@ public struct ContentView: View {
             RetroCopyProgressDialog(
                 currentFileName: currentCopyFileName,
                 fileProgress: currentCopyFileProgress,
-                totalFiles: totalFilesToProcess,
-                processedFiles: filesProcessedCount,
+                totalBytes: totalBytesToProcess,
+                processedBytes: totalBytesProcessed,
+                timeRemaining: timeRemainingString,
                 theme: theme,
                 onCancel: {
                     isOperationCancelled = true
+                    currentOperationTask?.cancel()
                     activeModal = nil
                 },
                 onBackground: {
@@ -1509,9 +1589,9 @@ public struct ContentView: View {
                 // Background Operation Status Bar
                 if isOperationInProgress && activeModal != .progress {
                     HStack(spacing: 8) {
-                        if totalFilesToProcess > 0 {
+                        if totalBytesToProcess > 0 {
                             // Copy/Move with progress bar
-                            let totalProgress = totalFilesToProcess > 0 ? Double(filesProcessedCount) / Double(totalFilesToProcess) : 0.0
+                            let totalProgress = totalBytesToProcess > 0 ? Double(totalBytesProcessed) / Double(totalBytesToProcess) : 0.0
                             Text(conflictIsMove ? "Moving:" : "Copying:")
                                 .font(theme.font(size: 11, weight: .bold))
                                 .foregroundColor(theme.subtleTextColor)
@@ -1523,7 +1603,7 @@ public struct ContentView: View {
                             
                             Spacer()
                             
-                            Text("\(filesProcessedCount)/\(totalFilesToProcess)")
+                            Text("\(formatBytes(totalBytesProcessed)) / \(formatBytes(totalBytesToProcess))")
                                 .font(theme.monoFont(size: 11))
                                 .foregroundColor(theme.textColor)
                             

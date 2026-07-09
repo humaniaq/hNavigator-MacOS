@@ -25,7 +25,7 @@ public struct VFSNode: Identifiable, Hashable, Sendable {
 public protocol VFSProvider: Sendable {
     var name: String { get }
     func listDirectory(at path: String) async throws -> [VFSNode]
-    func copyItem(from src: String, to dst: String, progress: ((Double) -> Void)?) async throws
+    func copyItem(from src: String, to dst: String, progress: ((Double, Int64) -> Void)?) async throws
     func moveItem(from src: String, to dst: String) async throws
     func deleteItem(at path: String) async throws
     func createDirectory(at path: String) async throws

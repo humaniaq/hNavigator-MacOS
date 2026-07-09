@@ -21,6 +21,7 @@ public struct RetroHelpDialog: View {
             .tabBtn(1),
             .tabBtn(2),
             .tabBtn(3),
+            .tabBtn(4),
             .ok
         ]
         guard let current = focusedField else {
@@ -45,6 +46,7 @@ public struct RetroHelpDialog: View {
                         tabButton(title: "Selection", index: 1)
                         tabButton(title: "File Ops", index: 2)
                         tabButton(title: "Tools & Bookmarks", index: 3)
+                        tabButton(title: "Compliance", index: 4)
                     }
                     .padding(.horizontal, 4)
                 }
@@ -174,19 +176,53 @@ public struct RetroHelpDialog: View {
                 shortcutRow(keys: "Cmd + Z", desc: "Create ZIP archive of selected items")
                 shortcutRow(keys: "Cmd + O", desc: "Open selected item with default macOS app")
             }
-        default:
+        case 3:
             VStack(alignment: .leading, spacing: 6) {
-                shortcutRow(keys: "F3 / Space", desc: "Quick view file (Text/Hex Mode)")
+                shortcutRow(keys: "F3", desc: "Quick view file (Text/Hex Mode)")
                 shortcutRow(keys: "F4", desc: "Edit file in built-in Text Editor")
                 shortcutRow(keys: "F9", desc: "Cycle UI theme style")
                 shortcutRow(keys: "F10 / Cmd+Q", desc: "Quit application")
                 shortcutRow(keys: "Cmd + F / /", desc: "Toggle Quick Live Filter bar")
                 shortcutRow(keys: "Cmd + G / Alt+F7", desc: "Deep file search dialog")
                 shortcutRow(keys: "Cmd + B", desc: "Bookmark current folder")
-                shortcutRow(keys: "Cmd + 1...9", desc: "Go to bookmark 1-9 in active panel")
+                shortcutRow(keys: "Cmd + 1...9", desc: "Trigger F1...F9 function keys")
                 shortcutRow(keys: "Cmd + T", desc: "Open current folder in Terminal")
                 shortcutRow(keys: "Cmd + Shift + R", desc: "Reveal current folder in Finder")
             }
+        default:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Legal & Compliance:")
+                    .font(theme.font(size: 12, weight: .bold))
+                    .foregroundColor(theme.glowColor)
+                    .padding(.bottom, 2)
+                
+                complianceLink(title: "Privacy Policy", urlString: "https://humaniaq.notion.site/Privacy-policy-38fe92b23a9080be8b8be3c164bb58d5")
+                complianceLink(title: "Terms & Conditions", urlString: "https://humaniaq.notion.site/Terms-and-Conditions-3319975d885b495fac89a98f073bc2fb")
+                complianceLink(title: "Support Desk", urlString: "https://humaniaq.notion.site/Support-38fe92b23a908055b69ad37cda9d3286")
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func complianceLink(title: String, urlString: String) -> some View {
+        if let url = URL(string: urlString) {
+            Link(destination: url) {
+                HStack {
+                    Text(title)
+                        .font(theme.font(size: 11, weight: .bold))
+                        .foregroundColor(theme.textColor)
+                    Spacer()
+                    Text("Open ↗")
+                        .font(theme.font(size: 9))
+                        .foregroundColor(theme.glowColor)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(theme.borderColor.opacity(0.1))
+                .cornerRadius(4)
+                .border(theme.borderColor.opacity(0.3), width: 1)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
     }
 }
@@ -1537,20 +1573,25 @@ public struct ASCIIProgressBar: View {
 public struct RetroCopyProgressDialog: View {
     let currentFileName: String
     let fileProgress: Double
-    let totalFiles: Int
-    let processedFiles: Int
+    let totalBytes: Int64
+    let processedBytes: Int64
+    let timeRemaining: String
     let theme: AppTheme
     let onCancel: () -> Void
     let onBackground: () -> Void
     
     @State private var isHoveringCancel = false
     @State private var isHoveringBackground = false
+    @State private var showCancelConfirm = false
+    @State private var isHoveringConfirmCancel = false
+    @State private var isHoveringDenyCancel = false
     
-    public init(currentFileName: String, fileProgress: Double, totalFiles: Int, processedFiles: Int, theme: AppTheme, onCancel: @escaping () -> Void, onBackground: @escaping () -> Void) {
+    public init(currentFileName: String, fileProgress: Double, totalBytes: Int64, processedBytes: Int64, timeRemaining: String, theme: AppTheme, onCancel: @escaping () -> Void, onBackground: @escaping () -> Void) {
         self.currentFileName = currentFileName
         self.fileProgress = fileProgress
-        self.totalFiles = totalFiles
-        self.processedFiles = processedFiles
+        self.totalBytes = totalBytes
+        self.processedBytes = processedBytes
+        self.timeRemaining = timeRemaining
         self.theme = theme
         self.onCancel = onCancel
         self.onBackground = onBackground
@@ -1582,34 +1623,56 @@ public struct RetroCopyProgressDialog: View {
                 
                 // Total Progress
                 VStack(alignment: .leading, spacing: 4) {
-                    let totalProgress = totalFiles > 0 ? Double(processedFiles) / Double(totalFiles) : 0.0
+                    let totalProgress = totalBytes > 0 ? Double(processedBytes) / Double(totalBytes) : 0.0
                     HStack {
                         Text("Total Progress")
                             .font(theme.font(size: 12))
                             .foregroundColor(theme.subtleTextColor)
                         Spacer()
-                        Text("\(processedFiles) / \(totalFiles)")
-                            .font(theme.monoFont(size: 12))
-                            .foregroundColor(theme.textColor)
+                        if !timeRemaining.isEmpty {
+                            Text("ETA: \(timeRemaining)")
+                                .font(theme.monoFont(size: 11))
+                                .foregroundColor(theme.textColor)
+                        }
                     }
                     ASCIIProgressBar(progress: totalProgress, width: 35, theme: theme)
                 }
                 
                 HStack(spacing: 20) {
                     Spacer()
-                    Button("Cancel") {
-                        onCancel()
+                    if showCancelConfirm {
+                        Text("Are you sure?")
+                            .font(theme.font(size: 13, weight: .bold))
+                            .foregroundColor(Color.red)
+                        
+                        Button("Yes, Cancel") {
+                            onCancel()
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .retroButtonStyle(theme: theme, isFocused: isHoveringConfirmCancel, type: .danger)
+                        .onHover { hover in isHoveringConfirmCancel = hover }
+                        
+                        Button("No") {
+                            showCancelConfirm = false
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .retroButtonStyle(theme: theme, isFocused: isHoveringDenyCancel, type: .secondary)
+                        .onHover { hover in isHoveringDenyCancel = hover }
+                    } else {
+                        Button("Cancel") {
+                            showCancelConfirm = true
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .retroButtonStyle(theme: theme, isFocused: isHoveringCancel, type: .danger)
+                        .onHover { hover in isHoveringCancel = hover }
+                        
+                        Button("Background") {
+                            onBackground()
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .retroButtonStyle(theme: theme, isFocused: isHoveringBackground, type: .secondary)
+                        .onHover { hover in isHoveringBackground = hover }
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .retroButtonStyle(theme: theme, isFocused: isHoveringCancel, type: .danger)
-                    .onHover { hover in isHoveringCancel = hover }
-                    
-                    Button("Background") {
-                        onBackground()
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .retroButtonStyle(theme: theme, isFocused: isHoveringBackground, type: .secondary)
-                    .onHover { hover in isHoveringBackground = hover }
                     Spacer()
                 }
                 .padding(.top, 8)
@@ -1621,7 +1684,7 @@ public struct RetroCopyProgressDialog: View {
 }
 
 // ==========================================
-// 12. ABOUT HMANAGER DIALOG
+// 12. ABOUT HNAVIGATOR DIALOG
 // ==========================================
 public struct RetroAboutDialog: View {
     let theme: AppTheme
@@ -1630,7 +1693,7 @@ public struct RetroAboutDialog: View {
     @FocusState private var isOkFocused: Bool
     
     public var body: some View {
-        RetroBox(title: "About hManager", theme: theme, isActive: true, doubleLine: true) {
+        RetroBox(title: "About hNavigator", theme: theme, isActive: true, doubleLine: true) {
             VStack(spacing: 16) {
                 // Header / Title
                 VStack(spacing: 4) {
@@ -1663,6 +1726,44 @@ public struct RetroAboutDialog: View {
                             .font(theme.font(size: 12))
                             .foregroundColor(theme.textColor)
                             .lineSpacing(4)
+                        
+                        Divider().background(theme.borderColor.opacity(0.3))
+                        
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Legal & Compliance:")
+                                .font(theme.font(size: 10, weight: .bold))
+                                .foregroundColor(theme.glowColor)
+                                .padding(.bottom, 2)
+                            
+                            HStack(spacing: 10) {
+                                if let privacyUrl = URL(string: "https://humaniaq.notion.site/Privacy-policy-38fe92b23a9080be8b8be3c164bb58d5") {
+                                    Link("Privacy Policy ↗", destination: privacyUrl)
+                                        .font(theme.font(size: 10, weight: .bold))
+                                        .foregroundColor(theme.textColor)
+                                }
+                                
+                                Text("|")
+                                    .font(theme.font(size: 10))
+                                    .foregroundColor(theme.borderColor.opacity(0.3))
+                                
+                                if let termsUrl = URL(string: "https://humaniaq.notion.site/Terms-and-Conditions-3319975d885b495fac89a98f073bc2fb") {
+                                    Link("Terms & Conditions ↗", destination: termsUrl)
+                                        .font(theme.font(size: 10, weight: .bold))
+                                        .foregroundColor(theme.textColor)
+                                }
+                                
+                                Text("|")
+                                    .font(theme.font(size: 10))
+                                    .foregroundColor(theme.borderColor.opacity(0.3))
+                                
+                                if let supportUrl = URL(string: "https://humaniaq.notion.site/Support-38fe92b23a908055b69ad37cda9d3286") {
+                                    Link("Support Desk ↗", destination: supportUrl)
+                                        .font(theme.font(size: 10, weight: .bold))
+                                        .foregroundColor(theme.textColor)
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
